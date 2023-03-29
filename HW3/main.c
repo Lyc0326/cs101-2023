@@ -1,108 +1,158 @@
-#include <stdio.h> //檔案開啟和關閉的標頭檔
-#include <stdlib.h> //最初的一些設定
-#include <time.h> //時間函數
-#include <string.h> //strlen-求字串長度
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
-int number[7] = {0};
-static int counter = 0;
-FILE* count;
-FILE* lotto;
+// program parameters
+#define MAXLOT 69    // max lottery number
+#define SPLOT 10     // max special lottery number
+                     // lottery number must begin with 1
+#define NORMAL 6     // how many normal lot number
+                     // only 1 special lot number allowed
+#define MAX_GEN 5    // max lot number tuples to be generated
+#define LOTTO_M 100
 
-void print_number(int i) {
-    int special;//最後會有一個special number
-    for(int j=0; j<6; j++) {
-        number[j] = rand()%69+1;//前面代表共69個數，後面代表從1開始
-        for(int k=0; k<j; k++) {
-            if(number[j]==number[k]) {
-                j -=1;
+// global variables
+int lot[MAXLOT];     // lottery tickets
+
+// function prototypes
+void init_lot(void); // initialize lot[]
+void shuf_lot(void); // shuffle the lot[]
+void sort_lot(void); // sort the first NORMAL lot numbers
+void swap_lot(int i, int j); // swap the i and j elements of lot[]
+int sp_lot(void);    // find the special number
+
+// struct
+typedef struct {
+    int receipt_id;
+    int receipt_price;
+    char receipt_time[32];
+    int lotto_set[5][7];
+} lotto_record_t;
+
+// main()
+int main(int argc, char* argv[]) {
+    srand((unsigned) time(NULL)); // random seed
+
+    time_t curtime;
+    char time_str[80];  // string buffer to store current time
+    int n;              // how many tuples of lot to buy?
+    FILE* fp;
+    FILE* ftxt;
+    int last_rec = -1;
+    int ticket_no = 0;
+    char TXT[80];
+    lotto_record_t lottos[LOTTO_M];
+    
+    printf("歡迎光臨長庚樂透彩購買機台\n");
+    fp = fopen("record.bin", "rb");
+    if (fp) {
+        for (int i=0; i<LOTTO_M; i++) {
+            int c = fread(&lottos[i], sizeof(lotto_record_t), 1, fp);
+            if (!c) {
+                last_rec = i - 1;
                 break;
-            } 
-        }
-    }
-    for(int a=0; a<5; a++) {
-        for(int b=a+1; b<6; b++) {
-            if(number[a]>number[b]) {
-                int temp;
-                temp = number[a];
-                number[a] = number[b];
-                number[b] = temp;
-                
             }
         }
-    }
-    number[6] = rand()%10+1;//這個是最後的special number
-    fprintf(lotto, "[%d]：", i);
-    for(int a=0; a<7; a++) {
-        fprintf(lotto, "%02d ", number[a]);
-    }
-    fprintf(lotto, "\n");
-}
-
-void print_nothing(int i) {
-    fprintf(lotto, "[%d]：", i);
-    for(int j=1; j<=7; j++) {
-        fprintf(lotto, "-- ");
-    }
-    fprintf(lotto, "\n");
-}
-
-void count_sell() { //數到底賣出了幾張
-    int arr_write[1]; //為什麼要加{0}，不加為什麼不可以
-    int arr_read[1];
-    if((count = fopen("count.bin", "r")) == NULL) {
-        count = fopen("count.bin", "wb+");
-        arr_write[0] = 1;
-        fwrite(arr_write, sizeof(int), 1, count);
+        fclose(fp);
+        ticket_no = lottos[last_rec].receipt_id;
+        fp = fopen("record.bin", "ab");
     } else {
-        count = fopen("count.bin", "rb+");
-        fseek(count, 0, SEEK_SET);
-        fread(arr_read, sizeof(int), 1, count);
-        fclose(count);
-        arr_write[0] = arr_read[0]+1;
-        count = fopen("count.bin", "wb+");
-        fwrite(arr_write, sizeof(int), 1, count);
-    } 
-    fclose(count);
-    counter = arr_write[0];
-}
-
-int main() {
-    int n;
-    char lotto_name[100];
-    printf("歡迎光臨長庚樂透彩購買機台\n");
+        fp = fopen("record.bin", "wb");
+    }
+    ticket_no++;
+    sprintf(TXT, "lotto[%05d].txt", ticket_no);
+    
     printf("請問您要買幾組樂透彩：");
     scanf("%d", &n);
-    while(n > 0) {
-        if(n>5) {
-            printf("請重新輸入(1~5張)：");
-            scanf("%d", &n);
-        } else break;
-    }
-    count_sell(count);
-    sprintf(lotto_name, "lotto[%05d].txt", counter);
-    lotto = fopen(lotto_name, "w+");
-    //lotto = fopen("lotto.txt", "w+");
-    fprintf(lotto, "========= lotto649 =========\n");
-    fprintf(lotto, "========+ No.%05d +========\n", counter);
-    time_t curtime;
-    time(&curtime); //因為time後面有\n, 因此需要先計算字串長度，在減掉
-    char* tmstr = ctime(&curtime); //變動記憶體，計算
-    size_t length = strlen(tmstr);
-    tmstr[length-1] = '\0';//把\n改成\0
-    fprintf(lotto, "= %s =\n", tmstr);
-    srand((unsigned) time(NULL));
-    for (int i=1; i<=5; i++) {
-        if (i<=n) {
-            print_number(i);
-        } else {
-            print_nothing(i);
+    lottos[last_rec+1].receipt_id = ticket_no;
+    lottos[last_rec+1].receipt_price = n * 100;
+    printf("已為您購買的 %d 組樂透組合輸出至 lotto[%05d].txt\n", n, ticket_no);
+
+    ftxt = fopen(TXT, "w");
+    fprintf(ftxt, "========= lotto649 =========\n");
+
+    time(&curtime);
+    // ctime() attaches a newline (0x0A) charaacter, i.e., "%s\n"
+    // We got to remove it manually.
+    strcpy(time_str, ctime(&curtime));
+    for (int i=0; i<sizeof(time_str)/sizeof(time_str[0]); i++) {
+        if (time_str[i] == '\0') {
+            time_str[i-1] = '\0';
+            break;
         }
     }
-    fprintf(lotto, "========= csie@CGU =========");
-    fclose(lotto);
-    printf("已為您購買的 %d 組樂透組合輸出至 lotto[%05d].txt\n", n, counter);
-  
+    fprintf(ftxt, "========+ No.%05d +========\n", ticket_no);
+    fprintf(ftxt, "= %s =\r\n", time_str);
+    strcpy(lottos[last_rec+1].receipt_time, time_str);
+
+    init_lot();  // initialize the lot[] array
+
+    for (int i=0; i<MAX_GEN; i++) {
+        shuf_lot(); // shuffle lot[] array
+        sort_lot(); // sort the first MAXLOT elements in lot[]
+        fprintf(ftxt, "[%1d]: ",i+1);
+        for (int j=0; j<NORMAL; j++) {
+            if (i<n) {
+                fprintf(ftxt, "%02d ", lot[j]);
+                lottos[last_rec+1].lotto_set[i][j] = lot[j];
+            } else {
+                fprintf(ftxt, "-- ");
+                lottos[last_rec+1].lotto_set[i][j] = 0;
+            }
+        }
+        if (i<n) {
+            int splot = sp_lot();
+            fprintf(ftxt, "%02d\n", splot);
+            lottos[last_rec+1].lotto_set[i][NORMAL] = splot;
+        } else {
+            fprintf(ftxt, "--\n");
+        }
+    }
+    fwrite(&lottos[last_rec+1], sizeof(lottos[0]), 1, fp);
+    fclose(fp);
+
+    fprintf(ftxt, "========= cise@CGU =========\n");
+    fclose(ftxt);
     return 0;
 }
 
+void init_lot(void) {
+    for (int i=0; i<MAXLOT; i++) {
+        lot[i]=i+1;
+    }
+}
 
+void shuf_lot(void) {
+    int tmp, k;
+    for (int i=MAXLOT-1; i>0; i--) {
+        k = rand() % (i+1);
+        swap_lot(i, k);
+    }
+}
+
+int sp_lot(void) {
+    for (int i=NORMAL; i<MAXLOT; i++) {
+        if (lot[i] <= SPLOT) {
+            return lot[i];
+        }
+    }
+    return -1;
+}
+
+void sort_lot(void) {
+    int tmp;
+    for (int i=0; i<NORMAL; i++) {
+        for (int j=0; j<NORMAL; j++) {
+            if (lot[i] < lot[j]) {
+                swap_lot(i, j);
+            }
+        }
+    }
+}
+
+void swap_lot(int i, int j) {
+   int tmp = lot[i];
+   lot[i] = lot[j];
+   lot[j] = tmp;
+}
